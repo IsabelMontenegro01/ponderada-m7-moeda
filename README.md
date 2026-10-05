@@ -104,3 +104,45 @@ python data/baixar_btc.py
 &emsp;**A tarefa de previsão:** dado os fechamentos dos últimos 7 dias, estimar o fechamento do dia seguinte.
 
 &emsp;**Treino e teste:** como é série temporal, separei de forma cronológica: os primeiros 80% dos dias treinam e os 20% mais recentes testam. Não embaralhei nada, senão o modelo "veria o futuro" no treino.
+
+## Devlog
+
+### Etapa 1 - Entender o desafio e desenhar a arquitetura 
+
+&emsp;**O que eu fiz:** li o enunciado e separei o que era obrigatório: treino em Docker ou notebook, um segundo container com backend em Python, uma rota de predição e uma forma de checar se o serviço está vivo.
+
+&emsp;**Decisões:**
+- **Dois containers separados** (treino e backend). O treino roda e termina; o backend fica de pé. Faz sentido porque são ciclos de vida diferentes.
+- **Volume compartilhado `./models`** pra passar o modelo de um container pro outro. Considerei copiar o modelo pra dentro da imagem do backend, mas aí cada novo treino exigiria rebuild da imagem.
+- **FastAPI** no backend, porque valida a entrada sozinho e gera a página `/docs`.
+- **Previsão:** fechamento do dia seguinte, olhando os 7 últimos dias.
+
+&emsp;**Evidência:** diagrama UML em [`README.md`](README.md).
+
+&emsp;**Uso de IA:** pedi ajuda pra IA pra organizar a estrutura de pastas e montar o mermaid do diagrama. Eu revisei pra ver se estava batendo com o que eu tinha pensado (principalmente a parte do volume).
+
+### Etapa 2 - Dados
+
+&emsp;**O que eu fiz:** baixei o histórico diário de BTC-USD do Yahoo Finance com o `data/baixar_btc.py` e salvei em `data/btc_usd.csv`.
+
+&emsp;**Decisões:** guardei o CSV no repositório pra o treino não depender de internet e pra qualquer pessoa conseguir reproduzir com os mesmos dados.
+
+&emsp;**Teste:** conferi o arquivo depois de baixar:
+
+```bash
+head -5 data/btc_usd.csv
+date,close,volume
+2020-01-01,7200.17431640625,18565664997
+2020-01-02,6985.47021484375,20802083465
+2020-01-03,7344.88427734375,28111481032
+2020-01-04,7410.65673828125,18444271275
+```
+
+```bash
+wc -l data/btc_usd.csv
+2471 data/btc_usd.csv
+```
+
+&emsp;**Dificuldade:** Nessa etapa, gerar o csv não me gerou dúvidas
+
+&emsp;**Uso de IA:** a IA escreveu o script de download pra ganhar tempo. O que eu entendi: ele baixa preço diário, fica só com data, fechamento e volume, e salva em CSV.
