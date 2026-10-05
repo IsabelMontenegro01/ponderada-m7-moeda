@@ -44,7 +44,7 @@ ponderada-m7-moeda/
 
 &emsp;Para ter uma referência antes dos modelos, também calculo um **baseline**. Nesse caso, a previsão é simplesmente considerar que o preço do próximo dia será igual ao último preço conhecido. Assim consigo comparar os modelos de machine learning com uma estratégia bem simples.
 
-&emsp;Os dois modelos escolhidos para comparação foram **Ridge** e **Random Forest**. Uso o MAE para comparar os resultados. Quanto menor o MAE, menor foi o erro médio das previsões no conjunto de teste.
+&emsp;Eu quis comparar um modelo mais simples e linear, que foi o Ridge, com um modelo capaz de capturar relações não lineares, que foi o Random Forest. Além deles, coloquei o baseline para ter uma referência simples.
 
 &emsp;Nos testes, o Ridge teve MAE de **1323,11 USD** e o Random Forest teve **1352,42 USD**. O Ridge foi o melhor entre os dois modelos de machine learning. Só que o baseline teve MAE de **1305,76 USD**, então ele ainda foi melhor que os dois modelos. Isso mostra que, com os dados e a configuração que usei, o modelo não conseguiu superar uma previsão bem simples.
 
@@ -424,7 +424,7 @@ docker run --rm \
 * `-v "$(pwd)/models:/models"` monta a pasta `models` do projeto em `/models`. Diferentemente de `data`, essa pasta não é somente leitura porque o treinamento precisa salvar o modelo gerado.
 * `treino-btc` é a imagem Docker que havia sido construída anteriormente com o ambiente necessário para executar o treinamento.
 
-&emsp;A execução finalmente funcionou e apresentou:
+&emsp;A execução apresentou:
 
 ```text
 [treino] 2470 linhas, de 2020-01-01 até 2026-10-05
@@ -454,14 +454,6 @@ docker run --rm \
 ```
 
 &emsp;Como `/models` está montado diretamente com a pasta `models` do projeto, esse arquivo fica disponível fora do container e pode ser utilizado posteriormente pelo backend.
-
-&emsp;**Dificuldade:**
-
-&emsp;A principal dificuldade dessa etapa foi configurar corretamente o ambiente de execução do treinamento. A primeira tentativa pelo Git Bash apresentou um `FileNotFoundError` para `/data/btc_usd.csv`, mesmo o arquivo existindo na pasta `data/`. Ao investigar, percebi que havia um problema na montagem dos volumes entre os caminhos do Windows e o Docker. Uma tentativa de passar o caminho absoluto também resultou em `Access is denied`.
-
-&emsp;Para resolver, passei a utilizar o WSL 2, que já estava instalado e integrado ao Docker Desktop. O próprio Ubuntu, porém, apresentou erros de inicialização relacionados ao usuário e ao filesystem da distribuição. Usei o GPT para interpretar as mensagens exibidas no terminal, entender a função dos comandos e identificar uma sequência segura de diagnóstico. Verifiquei a versão e o estado do WSL com `wsl --status` e `wsl --list --verbose`, encerrei a distribuição com `wsl --terminate Ubuntu`, atualizei o WSL com `wsl --update` e reiniciei o computador. Após isso, o Ubuntu voltou a iniciar normalmente e consegui executar o Docker pelo WSL.
-
-&emsp;Essa etapa foi importante porque, além de executar o treinamento, precisei entender a relação entre **Windows, Git Bash, WSL 2 e Docker Desktop**, principalmente a diferença na forma como os caminhos dos arquivos são interpretados e montados dentro do container.
 
 **Uso de IA:**
 
