@@ -404,3 +404,90 @@ docker run --rm \
 &emsp;A IA gerou a base do `train.py`. Li linha por linha e os comentários no código explicam o que eu entendi.
 
 &emsp;Como já relatado acima, utilizei o GPT para me auxiliar na configuração do ambiente, principalmente na interpretação dos erros do terminal e na identificação dos comandos necessários para configurar o WSL e o Docker.
+
+Eu colocaria as evidências diretamente na parte de teste, sem repetir demais o que você já explicou nas decisões:
+
+---
+
+### Etapa 4 - Backend de inferência
+
+&emsp;**O que eu fiz:** escrevi/revisei `backend/app.py`, o `Dockerfile` do backend e o `docker-compose.yml`.
+
+&emsp;**Decisões:**
+
+* O modelo carrega uma vez quando o container sobe, e não a cada requisição.
+* `/health` informa se o modelo foi carregado, permitindo verificar também se o volume com o modelo funcionou corretamente.
+* Validação: exatamente 7 preços, todos positivos. Caso contrário, a API retorna erro `422`.
+* No compose usei `depends_on` com `service_completed_successfully`, assim o backend só sobe depois que o treino termina e o arquivo do modelo já existe.
+* Fixei a mesma versão do scikit-learn nos dois `requirements.txt`, porque um arquivo `.joblib` pode apresentar problemas de compatibilidade caso seja carregado com uma versão diferente da utilizada no treinamento.
+
+&emsp;**Teste do backend isoladamente:**
+
+&emsp;Primeiro construí a imagem do backend:
+
+```bash
+docker build -t backend-btc ./backend
+```
+
+&emsp;O build foi concluído com sucesso:
+
+```text
+[+] Building 42.6s (10/10) FINISHED
+...
+=> [5/5] COPY app.py .
+...
+=> naming to docker.io/library/backend-btc:latest
+```
+
+&emsp;O comando `docker build` lê o `Dockerfile` dentro de `backend/`, instala as dependências definidas no `requirements.txt`, copia o `app.py` para a imagem e, ao final, cria a imagem `backend-btc`.
+
+&emsp;Depois executei o container:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -v "$(pwd)/models:/models:ro" \
+  backend-btc
+```
+
+&emsp;A saída mostrou que o servidor iniciou corretamente:
+
+```text
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+&emsp;Também foi possível confirmar que o modelo treinado na etapa anterior foi encontrado e carregado:
+
+```text
+[backend] modelo carregado de /models/modelo_btc.joblib
+```
+
+&emsp;O parâmetro `-p 8000:8000` fez a porta `8000` do container ficar acessível pela porta `8000` da máquina. Já o volume `-v "$(pwd)/models:/models:ro"` disponibilizou a pasta `models` dentro do container em `/models`, em modo somente leitura.
+
+&emsp;Após iniciar o backend, abri outro terminal WSL e testei o endpoint de saúde:
+
+```bash
+curl http://localhost:8000/health
+```
+
+&emsp;O backend registrou a requisição:
+
+```text
+172.17.0.1:56902 - "GET /health HTTP/1.1" 200 OK
+```
+
+&emsp;E o terminal retornou:
+
+```json
+{"status":"ok","modelo_carregado":true}
+```
+
+&emsp;O código `200 OK` confirma que a requisição foi processada com sucesso, enquanto `"modelo_carregado":true` confirma que a API conseguiu acessar o arquivo `modelo_btc.joblib` e carregá-lo corretamente.
+
+&emsp;**Resultado:** o backend foi construído e executado com sucesso, o modelo foi carregado corretamente e o endpoint `/health` respondeu conforme esperado.
+
+&emsp;**Dificuldade:** não tive dificuldades durante o teste do backend.
+
+&emsp;**Uso de IA:** a IA gerou a base do `app.py` e do compose. Entendi o fluxo: o container sobe, carrega o modelo e o `/predict` aplica a mesma transformação utilizada no treino, dividindo os preços pelo último preço antes de chamar o `predict`.
