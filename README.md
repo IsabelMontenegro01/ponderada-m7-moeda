@@ -146,3 +146,261 @@ wc -l data/btc_usd.csv
 &emsp;**Dificuldade:** Nessa etapa, gerar o csv não me gerou dúvidas
 
 &emsp;**Uso de IA:** a IA escreveu o script de download pra ganhar tempo. O que eu entendi: ele baixa preço diário, fica só com data, fechamento e volume, e salva em CSV.
+
+### Etapa 3 - Treino e exportação do modelo
+
+&emsp;**O que eu fiz:** escrevi/revisei o `training/train.py`, o `requirements.txt` e o `Dockerfile` responsável pelo ambiente de treinamento. A ideia foi deixar o treinamento reproduzível dentro de um container Docker, lendo os dados da pasta `data/` e salvando o modelo treinado na pasta `models/`.
+
+&emsp;**Decisões:**
+
+* Janela de 7 dias, dividida pelo último preço. Dessa forma, o modelo aprende a variação do preço em relação ao valor mais recente, em vez de trabalhar diretamente com o valor absoluto do dólar.
+* Split cronológico 80/20, sem embaralhar os dados. Como se trata de uma série temporal, mantive a ordem dos acontecimentos para evitar que dados do futuro fossem usados no treinamento de forma indevida.
+* Dois modelos foram comparados: Ridge e Random Forest.
+* Também foi utilizado o baseline "amanhã = hoje", que serve como uma referência simples para verificar se os modelos realmente conseguem melhorar uma previsão muito básica.
+* O modelo escolhido foi salvo em formato `joblib`, adequado para modelos do scikit-learn.
+* Também foi definido o salvamento de um `metadata.json`, contendo informações como a janela utilizada e as métricas, para que o backend saiba como utilizar o artefato posteriormente.
+
+&emsp;**Primeira tentativa de execução:**
+
+&emsp;Inicialmente tentei executar o treinamento pelo Git Bash:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/data:/data:ro" \
+  -v "$(pwd)/models:/models" \
+  treino-btc
+```
+
+&emsp;O container iniciou, mas o treinamento apresentou:
+
+```text
+Traceback (most recent call last):
+  File "/app/train.py", line 93, in <module>
+    main()
+  File "/app/train.py", line 41, in main
+    df = pd.read_csv(DATA_PATH, parse_dates=["date"]).sort_values("date")
+...
+FileNotFoundError: [Errno 2] No such file or directory: '/data/btc_usd.csv'
+```
+
+&emsp;A primeira interpretação foi que o arquivo CSV não existia ou não estava sendo montado corretamente dentro do container. Verifiquei a pasta `data/` diretamente no terminal:
+
+```bash
+ls data/
+```
+
+&emsp;A saída foi:
+
+```text
+baixar_btc.py
+btc_usd.csv
+```
+
+&emsp;Ou seja, o arquivo existia no meu computador e estava com o nome correto. Isso indicou que o problema não estava no dataset, mas na forma como o diretório estava sendo montado no container.
+
+&emsp;Também percebi que haviam surgido pastas com nomes estranhos, como `data;C` e `models;C`. Isso indicava um problema na interpretação dos caminhos do Windows pelo Git Bash ao utilizar `$(pwd)` nos volumes do Docker.
+
+&emsp;**Tentativa de corrigir o caminho pelo Git Bash:**
+
+&emsp;Tentei passar os caminhos do Windows explicitamente:
+
+```bash
+docker run --rm \
+  -v "C:/Users/Isabel/OneDrive/Documentos/Inteli/2026/M07/ponderada-m7-moeda/data:/data:ro" \
+  -v "C:/Users/Isabel/OneDrive/Documentos/Inteli/2026/M07/ponderada-m7-moeda/models:/models" \
+  treino-btc
+```
+
+&emsp;Nesse caso, o Docker retornou:
+
+```text
+docker: Error response from daemon: mkdir C:\Users\Isabel: Access is denied.
+
+Run 'docker run --help' for more information
+```
+
+&emsp;Esse erro mostrou que o problema estava relacionado ao acesso/montagem dos diretórios do Windows pelo Docker Desktop, e não ao código do treinamento.
+
+&emsp;**Mudança para WSL:**
+
+&emsp;Como eu já tinha o WSL instalado, decidi utilizar o Ubuntu integrado ao Docker Desktop em vez do Git Bash. A intenção foi executar os comandos em um ambiente Linux, evitando a conversão de caminhos do Windows feita pelo Git Bash.
+
+&emsp;Inicialmente, porém, o Ubuntu também apresentou problemas para iniciar. Ao tentar:
+
+```powershell
+wsl -d Ubuntu
+```
+
+&emsp;recebi:
+
+```text
+<3>WSL (1676 - Relay) ERROR: CreateProcessParseCommon:999: getpwnam(isabelmontenegro) failed 5
+<3>WSL (1676 - Relay) ERROR: CreateProcessParseCommon:1008: getpwuid(1000) failed 5
+<3>WSL (1676 - Relay) ERROR: ConfigUpdateLanguage:2580: fopen(/etc/default/locale) failed 5
+<3>WSL (1676 - Relay) ERROR: operator():519: getpwuid(0) failed 5
+<3>WSL (1676) ERROR: I/O error @util.cpp:1327 (UtilInitGroups)
+<3>WSL (1676 - Relay) ERROR: CreateProcessCommon:742: Create process failed
+```
+
+&emsp;Usei o GPT para me ajudar a interpretar essas mensagens do terminal e entender que o problema não estava no projeto, mas na inicialização do Ubuntu dentro do WSL. Também fui orientada sobre quais comandos utilizar para verificar o estado do WSL sem apagar a distribuição.
+
+&emsp;Primeiro verifiquei o estado do WSL:
+
+```powershell
+wsl --status
+```
+
+&emsp;que mostrou:
+
+```text
+Distribuição Padrão: Ubuntu
+Versão Padrão: 2
+```
+
+&emsp;Depois:
+
+```powershell
+wsl --list --verbose
+```
+
+&emsp;e obtive:
+
+```text
+NAME              STATE           VERSION
+* Ubuntu            Running         2
+  docker-desktop    Running         2
+```
+
+&emsp;Isso confirmou que eu estava utilizando **WSL 2** e que o Docker Desktop também estava rodando sobre WSL 2.
+
+&emsp;Ainda assim, o Ubuntu continuava apresentando problemas. Tentei iniciar a distribuição como `root` para verificar se o problema estava relacionado ao usuário:
+
+```powershell
+wsl -d Ubuntu -u root
+```
+
+&emsp;mas também ocorreu:
+
+```text
+getpwnam(root) failed 5
+Usuário não encontrado.
+Código de erro: Wsl/WSL_E_USER_NOT_FOUND
+```
+
+&emsp;Depois, com orientação do GPT, encerrei a distribuição e atualizei o WSL:
+
+```powershell
+wsl --terminate Ubuntu
+wsl --update
+```
+
+&emsp;O comando `wsl --terminate Ubuntu` encerra especificamente a distribuição Ubuntu que estava com problema, enquanto `wsl --update` verifica/atualiza os componentes do WSL.
+
+&emsp;Também foi necessário reiniciar o computador para que a atualização e as alterações no ambiente fossem aplicadas.
+
+**Resultado após a atualização:**
+
+&emsp;Depois de reiniciar o computador, abri novamente o Docker Desktop, esperei o serviço iniciar e testei:
+
+```powershell
+wsl -d Ubuntu
+```
+
+&emsp;Dessa vez o Ubuntu iniciou corretamente:
+
+```text
+isabelmontenegro@Isabel-0515:/mnt/c/Users/Inteli$
+```
+
+&emsp;Com isso, passei a executar os comandos pelo WSL.
+
+&emsp;**Execução do treinamento pelo WSL:**
+
+&emsp;Dentro do Ubuntu, acessei a pasta do projeto:
+
+```bash
+cd "/mnt/c/Users/Isabel/OneDrive/Documentos/Inteli/2026/M07/ponderada-m7-moeda"
+```
+
+&emsp;O caminho `/mnt/c/` é a forma como o WSL acessa o disco `C:` do Windows. Dessa forma, não precisei mover ou alterar o repositório que continuou no OneDrive.
+
+&emsp;Depois confirmei os arquivos:
+
+```bash
+ls data/
+```
+
+&emsp;que mostrou:
+
+```text
+baixar_btc.py
+btc_usd.csv
+```
+
+&emsp;Também testei a comunicação com o Docker pelo WSL:
+
+```bash
+docker version
+```
+
+&emsp;Com o Docker funcionando, executei finalmente o treinamento:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/data:/data:ro" \
+  -v "$(pwd)/models:/models" \
+  treino-btc
+```
+
+&emsp;Nesse comando:
+
+* `docker run` cria e executa um container a partir da imagem `treino-btc`.
+* `--rm` faz com que o container seja removido automaticamente depois que o treinamento termina, evitando deixar containers parados ocupando espaço.
+* `-v "$(pwd)/data:/data:ro"` monta a pasta `data` do projeto dentro do container em `/data`. O `:ro` significa *read-only*, então o treinamento pode ler os dados, mas não modificá-los.
+* `-v "$(pwd)/models:/models"` monta a pasta `models` do projeto em `/models`. Diferentemente de `data`, essa pasta não é somente leitura porque o treinamento precisa salvar o modelo gerado.
+* `treino-btc` é a imagem Docker que havia sido construída anteriormente com o ambiente necessário para executar o treinamento.
+
+&emsp;A execução finalmente funcionou e apresentou:
+
+```text
+[treino] 2470 linhas, de 2020-01-01 até 2026-10-05
+[treino] baseline (amanhã = hoje): MAE = 1305.76 USD
+[treino] ridge: MAE = 1323.11 USD
+[treino] random_forest: MAE = 1352.42 USD
+[treino] melhor modelo: ridge
+[treino] modelo salvo em /models/modelo_btc.joblib
+```
+
+&emsp;O treinamento utilizou **2.470 registros**, cobrindo o período de **01/01/2020 a 05/10/2026**.
+
+&emsp;Os resultados foram:
+
+| Modelo                   |         MAE |
+| ------------------------ | ----------: |
+| Baseline (amanhã = hoje) | 1305,76 USD |
+| Ridge                    | 1323,11 USD |
+| Random Forest            | 1352,42 USD |
+
+&emsp;Nesse caso, o **Ridge foi o melhor entre os dois modelos testados**, com MAE de `1323,11 USD`. Porém, é importante observar que o baseline apresentou MAE menor (`1305,76 USD`). Portanto, apesar de o Ridge ter sido selecionado como o melhor modelo entre os modelos de ML avaliados, **ele não superou a estratégia simples de considerar que o preço de amanhã será igual ao preço de hoje**. Isso é um resultado importante da avaliação e mostra que o modelo ainda não apresenta ganho sobre uma referência muito simples.
+
+&emsp;Ao final, o modelo foi exportado para:
+
+```text
+/models/modelo_btc.joblib
+```
+
+&emsp;Como `/models` está montado diretamente com a pasta `models` do projeto, esse arquivo fica disponível fora do container e pode ser utilizado posteriormente pelo backend.
+
+&emsp;**Dificuldade:**
+
+&emsp;A principal dificuldade dessa etapa foi configurar corretamente o ambiente de execução do treinamento. A primeira tentativa pelo Git Bash apresentou um `FileNotFoundError` para `/data/btc_usd.csv`, mesmo o arquivo existindo na pasta `data/`. Ao investigar, percebi que havia um problema na montagem dos volumes entre os caminhos do Windows e o Docker. Uma tentativa de passar o caminho absoluto também resultou em `Access is denied`.
+
+&emsp;Para resolver, passei a utilizar o WSL 2, que já estava instalado e integrado ao Docker Desktop. O próprio Ubuntu, porém, apresentou erros de inicialização relacionados ao usuário e ao filesystem da distribuição. Usei o GPT para interpretar as mensagens exibidas no terminal, entender a função dos comandos e identificar uma sequência segura de diagnóstico. Verifiquei a versão e o estado do WSL com `wsl --status` e `wsl --list --verbose`, encerrei a distribuição com `wsl --terminate Ubuntu`, atualizei o WSL com `wsl --update` e reiniciei o computador. Após isso, o Ubuntu voltou a iniciar normalmente e consegui executar o Docker pelo WSL.
+
+&emsp;Essa etapa foi importante porque, além de executar o treinamento, precisei entender a relação entre **Windows, Git Bash, WSL 2 e Docker Desktop**, principalmente a diferença na forma como os caminhos dos arquivos são interpretados e montados dentro do container.
+
+**Uso de IA:**
+
+&emsp;A IA gerou a base do `train.py`. Li linha por linha e os comentários no código explicam o que eu entendi.
+
+&emsp;Como já relatado acima, utilizei o GPT para me auxiliar na configuração do ambiente, principalmente na interpretação dos erros do terminal e na identificação dos comandos necessários para configurar o WSL e o Docker.

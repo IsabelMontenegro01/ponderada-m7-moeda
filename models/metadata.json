@@ -1,0 +1,8 @@
+{
+  "modelo": "ridge",
+  "janela": 7,
+  "mae_teste_usd": 1323.11,
+  "mae_baseline_usd": 1305.76,
+  "linhas_treino": 2463,
+  "ultima_data": "2026-10-05"
+}
