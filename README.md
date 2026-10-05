@@ -407,9 +407,6 @@ docker run --rm \
 
 &emsp;Como já relatado acima, utilizei o GPT para me auxiliar na configuração do ambiente, principalmente na interpretação dos erros do terminal e na identificação dos comandos necessários para configurar o WSL e o Docker.
 
-Eu colocaria as evidências diretamente na parte de teste, sem repetir demais o que você já explicou nas decisões:
-
----
 
 ### Etapa 4 - Backend de inferência
 
@@ -493,3 +490,214 @@ curl http://localhost:8000/health
 &emsp;**Dificuldade:** não tive dificuldades durante o teste do backend.
 
 &emsp;**Uso de IA:** a IA gerou a base do `app.py` e do compose. Entendi o fluxo: o container sobe, carrega o modelo e o `/predict` aplica a mesma transformação utilizada no treino, dividindo os preços pelo último preço antes de chamar o `predict`.
+
+### Etapa 5 - Integração e testes
+
+&emsp;**O que eu fiz:** integrei o modelo treinado ao backend e realizei testes para verificar o funcionamento do sistema completo. Foram testados o carregamento do modelo, a disponibilidade da API, a realização de previsões, a comunicação com o cliente Python e a validação de entradas inválidas.
+
+&emsp;**5.1 Subir tudo**
+
+&emsp;Para iniciar os serviços do projeto, utilizei:
+
+```bash
+docker compose up
+```
+
+&emsp;O container responsável pelo treinamento executou o processo e apresentou:
+
+```text
+[treino] 2470 linhas, de 2020-01-01 até 2026-10-05
+[treino] baseline (amanhã = hoje): MAE = 1305.76 USD
+[treino] ridge: MAE = 1323.11 USD
+[treino] random_forest: MAE = 1352.42 USD
+[treino] melhor modelo: ridge
+[treino] modelo salvo em /models/modelo_btc.joblib
+treino-1 exited with code 0
+```
+
+&emsp;O treinamento foi concluído normalmente e o modelo Ridge foi salvo em `/models/modelo_btc.joblib`. Em seguida, o backend foi iniciado pelo Uvicorn:
+
+```text
+backend-1  | INFO:     Started server process [1]
+backend-1  | INFO:     Waiting for application startup.
+backend-1  | INFO:     Application startup complete.
+backend-1  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+backend-1  | [backend] modelo carregado de /models/modelo_btc.joblib
+```
+
+&emsp;A mensagem `modelo carregado de /models/modelo_btc.joblib` confirmou que o backend conseguiu acessar o artefato produzido na etapa de treinamento.
+
+&emsp;Também foram registradas chamadas ao endpoint `/health`, todas retornando `200 OK`:
+
+```text
+backend-1  | INFO:     127.0.0.1:55990 - "GET /health HTTP/1.1" 200 OK
+backend-1  | INFO:     127.0.0.1:39646 - "GET /health HTTP/1.1" 200 OK
+backend-1  | INFO:     127.0.0.1:56782 - "GET /health HTTP/1.1" 200 OK
+```
+
+&emsp;Também foi registrada uma requisição de previsão processada com sucesso:
+
+```text
+backend-1  | INFO:     172.20.0.1:51628 - "POST /predict HTTP/1.1" 200 OK
+```
+
+&emsp;Esses registros confirmaram que o backend estava ativo e conseguia receber requisições.
+
+&emsp;**5.2 Health**
+
+&emsp;Para verificar a disponibilidade da API, utilizei:
+
+```bash
+curl http://localhost:8000/health
+```
+
+&emsp;O endpoint respondeu com sucesso, conforme indicado pelo status `200 OK` registrado nos logs do backend:
+
+```text
+"GET /health HTTP/1.1" 200 OK
+```
+
+&emsp;Esse teste foi utilizado para verificar se o servidor estava disponível antes da realização das previsões.
+
+&emsp;**5.3 Predição**
+
+&emsp;Com o backend disponível, realizei uma requisição diretamente ao endpoint `/predict`, utilizando sete valores de fechamento:
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"ultimos_fechamentos":[60000,61000,60500,62000,63000,62500,64000]}'
+```
+
+&emsp;A resposta recebida foi:
+
+```json
+{
+  "ultimo_fechamento": 64000.0,
+  "previsao_proximo_fechamento": 64071.99,
+  "variacao_prevista_pct": 0.11,
+  "modelo": "ridge",
+  "aviso": "Experimental. Não é recomendação de investimento."
+}
+```
+
+&emsp;A API recebeu os sete fechamentos e retornou uma previsão de `64071.99`, partindo de um último fechamento de `64000.00`. A variação prevista foi de `0.11%`.
+
+&emsp;O campo `"modelo": "ridge"` confirmou que a previsão foi realizada utilizando o modelo Ridge treinado na etapa anterior.
+
+&emsp;**5.4 Cliente**
+
+&emsp;Após os testes diretos com a API, executei o cliente Python:
+
+```bash
+python3 client/cliente.py
+```
+
+&emsp;Na primeira tentativa, o cliente apresentou:
+
+```text
+Enviando: [83622.4296875, 83553.8515625, 84853.1015625, 84497.2109375, 84763.578125, 86480.3046875, 85385.8203125]
+
+ConnectionRefusedError: [Errno 111] Connection refused
+```
+
+&emsp;O erro `Connection refused` indicava que o cliente tentou estabelecer uma conexão com a API, mas não havia um servidor disponível naquele endereço e porta.
+
+&emsp;Para investigar a causa, verifiquei os containers em execução:
+
+```bash
+docker ps
+```
+
+&emsp;Como não havia nenhum container ativo, utilizei:
+
+```bash
+docker ps -a
+```
+
+&emsp;A saída mostrou que os containers do projeto haviam sido encerrados:
+
+```text
+91a6e5a48b85   ponderada-m7-moeda-backend   ...   Exited (0)   ...   ponderada-m7-moeda-backend-1
+8abff53b2ffd   ponderada-m7-moeda-treino    ...   Exited (0)   ...   ponderada-m7-moeda-treino-1
+```
+
+&emsp;O problema ocorreu porque eu já havia executado o `docker compose`, mas depois interrompi sua execução. Assim, quando tentei utilizar o cliente novamente, o backend não estava mais rodando para receber a requisição.
+
+&emsp;Durante a investigação, tentei iniciar o container utilizando:
+
+```bash
+docker start backend-btc
+```
+
+&emsp;O Docker retornou:
+
+```text
+Error response from daemon: No such container: backend-btc
+failed to start containers: backend-btc
+```
+
+&emsp;A mensagem indicou que não existia um container com esse nome. Ao consultar novamente `docker ps -a`, identifiquei que o container pertencente ao projeto era `ponderada-m7-moeda-backend-1`.
+
+&emsp;Para corrigir o problema, iniciei novamente os serviços do projeto:
+
+```bash
+docker compose up
+```
+
+&emsp;O backend voltou a ser executado e apresentou:
+
+```text
+backend-1  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+backend-1  | [backend] modelo carregado de /models/modelo_btc.joblib
+```
+
+&emsp;Depois disso, executei novamente o cliente:
+
+```bash
+python3 client/cliente.py
+```
+
+&emsp;A execução foi concluída com sucesso:
+
+```text
+Enviando: [83622.4296875, 83553.8515625, 84853.1015625, 84497.2109375, 84763.578125, 86480.3046875, 85385.8203125]
+
+Resposta: {
+  "ultimo_fechamento": 85385.8203125,
+  "previsao_proximo_fechamento": 85573.4,
+  "variacao_prevista_pct": 0.22,
+  "modelo": "ridge",
+  "aviso": "Experimental. Não é recomendação de investimento."
+}
+```
+
+&emsp;A resposta confirmou que o cliente conseguiu enviar os dados para o backend e receber a previsão do modelo. Nesse caso, o último fechamento informado foi `85385.82` e a previsão para o próximo fechamento foi `85573.40`, com variação prevista de `0.22%`.
+
+&emsp;**5.5 Erro de validação**
+
+&emsp;Por fim, testei o comportamento da API ao receber uma quantidade incorreta de valores. O modelo espera exatamente sete fechamentos, então enviei apenas três:
+
+```bash
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{"ultimos_fechamentos":[1,2,3]}'
+```
+
+&emsp;A API respondeu:
+
+```json
+{
+  "detail": "Envie exatamente 7 fechamentos."
+}
+```
+
+&emsp;Esse resultado confirmou que a validação de entrada está funcionando e impede que uma requisição com quantidade inadequada de dados seja processada pelo modelo.
+
+ &emsp;**Dificuldades:**
+
+&emsp;A principal dificuldade dessa etapa foi identificar a causa do `ConnectionRefusedError` apresentado pelo cliente. Inicialmente, o erro poderia indicar um problema na API ou na comunicação com o backend. A verificação dos containers mostrou que o serviço simplesmente não estava em execução, pois eu havia interrompido anteriormente o `docker compose`.
+
+&emsp;Também foi necessário identificar o nome correto do container, já que tentei utilizar `backend-btc`, mas esse não era o nome do container criado pelo projeto. Após verificar os containers existentes, executei novamente o `docker compose`, restabelecendo o serviço do backend.
+
+&emsp;Depois da correção, os testes confirmaram o funcionamento das diferentes partes do sistema: o modelo foi carregado pelo backend, a API respondeu ao health check, uma previsão foi realizada diretamente pelo `curl`, o cliente Python conseguiu consumir a API e a validação rejeitou corretamente uma entrada com apenas três fechamentos.
+
+&emsp;**Uso de IA:** Utilizei o GPT como apoio para interpretar as mensagens exibidas pelo terminal e compreender o funcionamento das etapas de integração e comunicação entre os containers, enquanto a execução dos comandos, verificação dos resultados e correção dos problemas foram realizadas por mim.

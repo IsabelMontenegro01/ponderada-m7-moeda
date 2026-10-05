@@ -1,0 +1,21 @@
+services:
+  treino:
+    build: ./training
+    volumes:
+      - ./data:/data:ro      # CSV entra aqui
+      - ./models:/models     # modelo sai aqui
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/models:ro  # o mesmo modelo, só leitura
+    depends_on:
+      treino:
+        condition: service_completed_successfully   # só sobe depois do treino terminar
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
