@@ -32,6 +32,8 @@ ponderada-m7-moeda/
 
 &emsp;O desafio pedia basicamente 4 peças conversando: ambiente de treino, o artefato do modelo, o container de inferência e uma aplicação cliente. O que eu entendi é que o treino e a inferência são coisas separadas, dois containers. O treino roda uma vez e termina, o resultado dele é um arquivo (o artefato), e a API só pega esse arquivo pronto e fica respondendo pedidos.
 
+&emsp;O ponto que o professor pediu pra explicar é como o modelo chega no segundo container. Eu resolvi isso com um **volume do Docker compartilhado** (`./models`): o container de treino grava o `modelo_btc.joblib` lá, e o backend lê da mesma pasta quando sobe. Assim o modelo não fica "assado" dentro da imagem, e se eu treinar de novo é só reiniciar o backend.
+
 ## Diagramas
 
 ### Diagrama de componentes
