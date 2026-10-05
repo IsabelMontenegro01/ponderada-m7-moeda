@@ -87,3 +87,20 @@ sequenceDiagram
 ```
 
 &emsp;O `docker compose` orquestra o processo garantindo que o backend de inferência só seja iniciado **depois** que o container de treino finalizar seu trabalho com sucesso. Primeiro o modelo é treinado e salvo no volume compartilhado; só então a API sobe, carrega esse modelo recém-criado e fica rodando continuamente para responder às requisições (`/health` e `/predict`) do cliente.
+
+## Os dados
+
+&emsp;Usei o histórico diário de **BTC-USD** do Yahoo Finance, de 2020-01-01 até o dia 2026-05-10. O CSV tem três colunas: `date`, `close` (preço de fechamento) e `volume`.
+
+&emsp;Baixei com o script `data/baixar_btc.py` (usa a biblioteca `yfinance`) e salvei como CSV dentro do repositório. Fiz isso pra ganhar tempo e pra o treino não depender de internet: o container de treino só lê o arquivo, não precisa baixar nada.
+
+&emsp;Pra gerar de novo:
+
+```bash
+pip install yfinance pandas
+python data/baixar_btc.py
+```
+
+&emsp;**A tarefa de previsão:** dado os fechamentos dos últimos 7 dias, estimar o fechamento do dia seguinte.
+
+&emsp;**Treino e teste:** como é série temporal, separei de forma cronológica: os primeiros 80% dos dias treinam e os 20% mais recentes testam. Não embaralhei nada, senão o modelo "veria o futuro" no treino.
