@@ -10,8 +10,6 @@
 ponderada-m7-moeda/
 ├── README.md             
 ├── docker-compose.yml     <- sobe treino + backend juntos
-├── docs/
-│   └── arquitetura.md     <- diagramas UML (mermaid)
 ├── data/
 │   ├── baixar_btc.py      <- script que baixa o histórico
 │   └── btc_usd.csv        <- dados (date, close, volume)
@@ -30,9 +28,48 @@ ponderada-m7-moeda/
 
 ## Entendimento da solução
 
-&emsp;O desafio pedia basicamente 4 peças conversando: ambiente de treino, o artefato do modelo, o container de inferência e uma aplicação cliente. O que eu entendi é que o treino e a inferência são coisas separadas, dois containers. O treino roda uma vez e termina, o resultado dele é um arquivo (o artefato), e a API só pega esse arquivo pronto e fica respondendo pedidos.
+&emsp;A solução foi construída separando o sistema em duas etapas principais: **treinamento** e **inferência**. O treinamento é responsável por transformar o histórico de preços em um modelo treinado. A inferência utiliza esse modelo já pronto para responder previsões sem precisar treinar novamente a cada requisição.
 
-&emsp;O ponto que o professor pediu pra explicar é como o modelo chega no segundo container. Eu resolvi isso com um **volume do Docker compartilhado** (`./models`): o container de treino grava o `modelo_btc.joblib` lá, e o backend lê da mesma pasta quando sobe. Assim o modelo não fica "assado" dentro da imagem, e se eu treinar de novo é só reiniciar o backend.
+&emsp;Essa separação foi feita porque treinamento e inferência possuem funções e ciclos de vida diferentes. O treinamento é uma tarefa que pode ser executada, gerar um artefato e terminar. Já o backend precisa permanecer disponível para receber várias requisições. Por isso, criei dois containers: o primeiro executa `train.py` e gera o modelo, enquanto o segundo executa a API FastAPI e utiliza o modelo já treinado.
+
+### Fluxo de treinamento
+
+&emsp;O primeiro fluxo começa com o arquivo `data/btc_usd.csv`, que contém o histórico diário do Bitcoin. Esse arquivo é montado no container de treinamento em `/data` como somente leitura. O `train.py` lê os preços de fechamento, organiza os registros por data e cria exemplos para o modelo utilizando uma janela de sete dias.
+
+&emsp;Para cada exemplo, os sete fechamentos são divididos pelo último preço da janela. Dessa forma, o modelo não trabalha diretamente com valores absolutos do Bitcoin, mas com a relação entre os preços da janela e o preço mais recente. O alvo também é representado como uma variação: o preço do dia seguinte dividido pelo preço do dia atual.
+
+&emsp;Depois da preparação, os dados são separados cronologicamente. Os 80% mais antigos são utilizados para treinamento e os 20% mais recentes para teste. Essa escolha é importante porque os dados representam uma série temporal. Em vez de embaralhar os registros, mantenho a ordem dos acontecimentos para evitar utilizar informações futuras durante o treinamento.
+
+&emsp;Na etapa de avaliação, são comparados dois modelos: **Ridge** e **Random Forest**. Também é calculado um baseline que simplesmente considera que o preço de amanhã será igual ao preço de hoje. O baseline funciona como uma referência simples: antes de considerar um modelo de machine learning útil, é necessário verificar se ele consegue superar essa estratégia básica.
+
+&emsp;Depois da comparação, o modelo com menor MAE entre os modelos de machine learning é escolhido. No teste realizado, o Ridge apresentou MAE de 1323,11 USD, enquanto o Random Forest apresentou 1352,42 USD. Entretanto, o baseline apresentou 1305,76 USD, portanto nenhum dos modelos superou a estratégia de usar o preço atual como previsão do próximo preço.
+
+&emsp;Após escolher o modelo, ele é treinado novamente utilizando todos os dados disponíveis e salvo como `modelo_btc.joblib`. Também é gerado o arquivo `metadata.json`, que guarda informações necessárias para a inferência, como o modelo escolhido e o tamanho da janela.
+
+### Fluxo de disponibilização do modelo
+
+&emsp;O modelo treinado precisa chegar ao segundo container, que executa o backend. Para isso, utilizei a pasta `./models` como um volume compartilhado entre os dois serviços.
+
+&emsp;O container de treinamento monta essa pasta em `/models` com permissão de escrita. Dessa forma, o `train.py` consegue salvar `modelo_btc.joblib` e `metadata.json`. O backend também monta a mesma pasta, mas em modo somente leitura. Assim, ele pode carregar o artefato sem alterar o modelo produzido pelo treinamento.
+
+&emsp;Escolhi essa abordagem em vez de colocar o modelo diretamente dentro da imagem do backend porque o modelo é um artefato produzido pelo treinamento. Se o treinamento for executado novamente, um novo arquivo pode substituir o artefato disponível no volume sem ser necessário reconstruir a imagem do backend apenas para copiar o modelo.
+
+### Fluxo de inferência
+
+&emsp;Quando o container do backend inicia, a API executa seu `lifespan` e procura o arquivo `modelo_btc.joblib` dentro de `/models`. Se o arquivo existir, ele é carregado com `joblib` uma única vez e permanece em memória enquanto o servidor estiver executando.
+
+&emsp;A API possui dois endpoints principais. O `/health` permite verificar se o servidor está funcionando e se o modelo foi carregado. Já o `/predict` recebe exatamente sete preços de fechamento, valida os valores recebidos e aplica a mesma transformação utilizada durante o treinamento.
+
+&emsp;Depois da transformação, o backend chama `modelo.predict()`. O resultado produzido pelo modelo representa uma variação em relação ao último fechamento informado. Essa variação é convertida novamente para um preço em dólar e devolvida na resposta, junto com o último fechamento, a variação percentual, o modelo utilizado e o aviso de que a previsão é experimental.
+
+### Fluxo completo da aplicação
+
+&emsp;Quando utilizo `docker compose up`, o Compose inicia primeiro o serviço de treinamento. O treinamento lê o CSV, avalia os modelos e salva o artefato no volume compartilhado. Como o backend utiliza `depends_on` com `service_completed_successfully`, ele só é iniciado depois que o treinamento termina com sucesso.
+
+&emsp;Depois disso, o backend monta o mesmo volume em modo somente leitura, carrega o modelo e inicia o servidor na porta 8000. A aplicação cliente ou uma ferramenta como `curl` pode então enviar uma requisição HTTP para `/predict`.
+
+&emsp;O fluxo completo pode ser resumido como: **dados históricos → treinamento → modelo treinado → volume compartilhado → backend → requisição HTTP → previsão**. Dessa forma, cada componente possui uma responsabilidade específica e a integração entre eles demonstra o objetivo principal da atividade.
+
 
 ## Diagramas
 
@@ -700,4 +737,10 @@ curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -
 
 &emsp;Depois da correção, os testes confirmaram o funcionamento das diferentes partes do sistema: o modelo foi carregado pelo backend, a API respondeu ao health check, uma previsão foi realizada diretamente pelo `curl`, o cliente Python conseguiu consumir a API e a validação rejeitou corretamente uma entrada com apenas três fechamentos.
 
-&emsp;**Uso de IA:** Utilizei o GPT como apoio para interpretar as mensagens exibidas pelo terminal e compreender o funcionamento das etapas de integração e comunicação entre os containers, enquanto a execução dos comandos, verificação dos resultados e correção dos problemas foram realizadas por mim.
+&emsp;**Uso de IA:** Utilizei o GPT como apoio para interpretar as mensagens exibidas pelo terminal e compreender o funcionamento das etapas de integração e comunicação entre os containers.
+
+### Resultado e limitações
+
+
+### O que eu aprendi
+
