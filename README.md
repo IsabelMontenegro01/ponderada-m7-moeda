@@ -129,7 +129,7 @@ sequenceDiagram
 
 ## Os dados
 
-&emsp;Usei o histórico diário de **BTC-USD** do Yahoo Finance, de 2020-01-01 até o dia 2026-05-10. O CSV tem três colunas: `date`, `close` (preço de fechamento) e `volume`.
+&emsp;Usei o histórico diário de **BTC-USD** do Yahoo Finance, de 2020-01-01 até o dia 2026-10-05. O CSV tem três colunas: `date`, `close` (preço de fechamento) e `volume`.
 
 &emsp;Baixei com o script `data/baixar_btc.py` (usa a biblioteca `yfinance`) e salvei como CSV dentro do repositório. Fiz isso pra ganhar tempo e pra o treino não depender de internet: o container de treino só lê o arquivo, não precisa baixar nada.
 
@@ -741,6 +741,26 @@ curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -
 
 ### Resultado e limitações
 
+&emsp;A solução foi executada com sucesso utilizando Docker Compose. O container de treinamento conseguiu ler o histórico do Bitcoin, comparar os modelos Ridge e Random Forest e salvar o modelo escolhido em `models/modelo_btc.joblib`. Em seguida, o backend conseguiu carregar esse artefato e disponibilizar os endpoints `/health` e `/predict`.
+
+&emsp;Também foi possível realizar uma previsão diretamente pela API e por meio do cliente Python. O teste de entrada inválida confirmou que o backend rejeita requisições que não possuem exatamente sete fechamentos ou que possuem preços não positivos.
+
+&emsp;Apesar do funcionamento da integração, existem limitações importantes. A principal é que o modelo não apresentou desempenho superior ao baseline utilizado. O Ridge apresentou MAE de 1323,11 USD, enquanto o baseline, que apenas repete o preço atual, apresentou MAE de 1305,76 USD. Portanto, não há evidência neste experimento de que o modelo de machine learning tenha produzido uma previsão melhor do que uma estratégia muito simples.
+
+&emsp;Outra limitação é que o modelo utiliza somente os preços de fechamento dos últimos sete dias. O dataset possui a coluna de volume, mas ela não foi utilizada como entrada do modelo. Também não foram considerados outros fatores que podem influenciar o preço do Bitcoin, como outras variáveis de mercado ou acontecimentos externos.
+
+&emsp;Além disso, a avaliação foi realizada com uma única separação cronológica de treino e teste. O experimento serve para demonstrar a solução de ponta a ponta, mas não é suficiente para afirmar que o modelo possui bom desempenho financeiro em diferentes períodos.
+
+&emsp;Por fim, a previsão disponibilizada pela API é experimental e não deve ser utilizada como recomendação de investimento.
 
 ### O que eu aprendi
 
+&emsp;Durante a atividade, entendi melhor a diferença entre **treinar um modelo e utilizar um modelo já treinado**. Antes, eu poderia pensar no modelo como parte da API, mas percebi que o treinamento gera um artefato separado, que pode ser salvo e depois carregado por outro serviço.
+
+&emsp;Também entendi melhor como um volume compartilhado pode ser utilizado para fazer a comunicação de arquivos entre containers. Nesse projeto, o treinamento escreve o modelo na pasta `models` e o backend lê o mesmo arquivo. Isso permite manter os dois containers separados sem precisar colocar o modelo dentro da imagem do backend.
+
+&emsp;Outra aprendizagem foi sobre o funcionamento do Docker Compose. Entendi que ele não serve apenas para iniciar vários containers, mas também pode definir a relação entre eles. Neste caso, o `depends_on` com `service_completed_successfully` faz com que o backend espere o treinamento terminar com sucesso antes de iniciar.
+
+&emsp;Na parte de machine learning, entendi melhor por que uma série temporal não deve ser dividida aleatoriamente entre treino e teste. Também compreendi a função do baseline: antes de considerar um modelo de machine learning bom, preciso comparar seu resultado com uma solução simples.
+
+&emsp;Por fim, aprendi que fazer uma aplicação funcionar envolve mais do que escrever o código. Durante a atividade precisei investigar problemas de caminhos entre Windows, Git Bash, WSL e Docker, além de entender erros de comunicação entre o cliente e o backend. A utilização da IA foi útil nesses momentos, mas foi necessário testar os comandos e conferir os resultados para entender o que estava acontecendo.
