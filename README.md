@@ -169,7 +169,6 @@ python data/baixar_btc.py
 
 &emsp;**Treino e teste:** como é série temporal, separei de forma cronológica: os primeiros 80% dos dias treinam e os 20% mais recentes testam. Não embaralhei nada, senão o modelo "veria o futuro" no treino.
 
-
 ## Devlog
 
 ### Etapa 1 - Entender o desafio e desenhar a arquitetura 
@@ -755,7 +754,7 @@ curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -
 
 &emsp;Esse resultado confirmou que a validação de entrada está funcionando e impede que uma requisição com quantidade inadequada de dados seja processada pelo modelo.
 
- &emsp;**Dificuldades:**
+&emsp;**Dificuldades:**
 
 &emsp;A principal dificuldade dessa etapa foi identificar a causa do `ConnectionRefusedError` apresentado pelo cliente. Inicialmente, o erro poderia indicar um problema na API ou na comunicação com o backend. A verificação dos containers mostrou que o serviço simplesmente não estava em execução, pois eu havia interrompido anteriormente o `docker compose`.
 
@@ -790,3 +789,37 @@ curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -
 &emsp;Na parte de machine learning, entendi melhor por que uma série temporal não deve ser dividida aleatoriamente entre treino e teste. Também compreendi a função do baseline: antes de considerar um modelo de machine learning bom, preciso comparar seu resultado com uma solução simples.
 
 &emsp;Por fim, aprendi que fazer uma aplicação funcionar envolve mais do que escrever o código. Durante a atividade precisei investigar problemas de caminhos entre Windows, Git Bash, WSL e Docker, além de entender erros de comunicação entre o cliente e o backend. A utilização da IA foi útil nesses momentos, mas foi necessário testar os comandos e conferir os resultados para entender o que estava acontecendo.
+
+## Como executar
+
+&emsp;Para iniciar a aplicação, execute:
+
+```bash
+docker compose up --build
+```
+
+&emsp;O treinamento será executado primeiro. Após a conclusão, o backend será iniciado automaticamente.
+
+&emsp;Para verificar se o backend está funcionando:
+
+```bash
+curl http://localhost:8000/health
+```
+
+&emsp;Para realizar uma previsão:
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"ultimos_fechamentos":[...]}'
+```
+
+&emsp;Também é possível realizar a previsão utilizando o cliente Python:
+
+```bash
+python client/cliente.py
+```
+
+&emsp;A documentação da API pode ser acessada em:
+
+`http://localhost:8000/docs`
